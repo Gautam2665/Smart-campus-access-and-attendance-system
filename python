@@ -1,0 +1,11 @@
+from mfrc522 import SimpleMFRC522
+import RPi.GPIO as GPIO
+
+reader = SimpleMFRC522()
+
+try:
+    print("Place your tag to read...")
+    id, text = reader.read()
+    print(f"Tag detected! ID: {id}, Text: {text}")
+finally:
+    GPIO.cleanup()
