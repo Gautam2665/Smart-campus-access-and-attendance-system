@@ -214,37 +214,40 @@ graph TD
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> Edge[Student approaches Entrance]
-    Edge --> Input{Provide ID Token}
-    Input -->|RFID Card| Pi1(Raspberry Pi: rfid_service.py)
-    Input -->|Fingerprint| Pi2(Raspberry Pi: fingerprint_enroll.py)
+    Start([Student Arrives at Smart Environment])
     
-    Pi1 -->|Extract User ID| API(Python API Server)
-    Pi2 -->|Extract User ID| API
+    %% BRANCH 1: FINGERPRINT / RFID ENTRY (DOOR EDGE)
+    Start --> Edge[Physical Access Point]
+    Edge --> Node1{Identify Access Medium}
+    Node1 -->|Fingerprint| Pi(Raspberry Pi: fingerprint_daemon.py)
+    Node1 -->|RFID Card| Pi
     
-    API --> FaceCap[Trigger Laptop Webcam]
-    FaceCap --> Liveness(Face Anti-Spoofing & Liveness Node)
+    Pi -->|Local Match Found| CloudLog{POST /api/attendance/log_unified}
+    CloudLog -->|Success| Door[Pulse GPIO Relay - Unlock Door]
+    Door --> Audit[POST /api/audit/trigger]
+    Audit --> DB[(Cloud SQLite: door_cms.db)]
     
-    Liveness --> SpoofCheck{Is Face Live?}
-    SpoofCheck -->|No - Spoof Detected| Reject[Reject Access]
+    %% BRANCH 2: LAPTOP FACE LIVENESS (TERMINAL EDGE)
+    Start --> WebApp[React Dashboard Entry]
+    WebApp -->|Submit Selfie| Webcam(Laptop: laptop_liveness_node.py)
     
-    SpoofCheck -->|Yes| FaceMatch{Does Face Match User ID?}
-    FaceMatch -->|No| Reject
-    FaceMatch -->|Yes| Log[Log Attendance Request]
+    Webcam -->|Run MobileNet / MiniFASNet| Liveness{check_liveness_official}
+    Liveness -->|Spoof / Fake| Reject1[Upload 'SPOOF_' evidence to AWS S3 & Reject]
+    Liveness -->|Live Verified| Sync[Upload clean photo to AWS S3]
+    Sync -->|Wait for Cloud| Poll[GET /api/hardware/poll]
     
-    Log --> DB[(door_cms.db SQLite)]
-    DB --> Analytics(AI Risk Node: simulate_anomalies.py)
+    %% INTELLIGENCE & AUDIT LAYER
+    DB --> |Set 'REQUESTED' Flag| CCTVCatcher(Laptop: poll_audit_requests)
+    CCTVCatcher --> |Capture Room View| FaceCounter{count_faces_cv2}
+    FaceCounter --> |> 1 Face = Tailgating| Evidence[Upload 'AUDIT_EVIDENCE' to AWS S3]
+    Evidence --> Finalize[POST /api/audit/finalize]
+    Finalize --> DB
     
-    Analytics --> RiskCheck{Any Anomalies?}
-    RiskCheck -->|Yes - Proxy/Time Issue| Flag[Flag as 'High Risk' in DB]
-    RiskCheck -->|No| Clean[Mark 'Pass']
-    
-    Flag --> Dash(React Dashboard: AI Flags Scene)
-    Clean --> Dash
-    Reject -->|Log Failed Try| Dash
-    
-    Dash --> Admin[Administrator Review]
-    Admin --> End([End])
+    %% DASHBOARD & AI RISK AGENT
+    DB --> AIRisk(AI LangChain Agent: Gemini 2.5 Flash)
+    AIRisk -->|Detect Anomalies| Analyze[Predictive Security Analysis]
+    Analyze -->|Flag High Risk| ReactUI(React Dashboard: AI Flags / Logs)
+    ReactUI --> Admin([System Admin Review])
 ```
 
 ## 3.4 Methodology
