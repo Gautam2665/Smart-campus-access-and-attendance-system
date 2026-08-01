@@ -59,7 +59,7 @@ def adaptive_liveness_decision(label, score, brightness, blur_score):
     # Preserving User's Custom Logic from Step 1537
 
     # Force high confidence for real
-    STRICT_REAL_THRESHOLD = 0.85  # ⚡ LOWERED to reduce false negatives
+    STRICT_REAL_THRESHOLD = 0.92
 
     # Hard reject extremely low scores
     if score < 0.65:
@@ -97,7 +97,7 @@ def check_liveness_official(image):
 
     if models_found == 0: return False, 0.0
     label = np.argmax(prediction)
-    score = min(1.0, float(prediction[0][label] / models_found))
+    score = float(prediction[0][label] / models_found)
     brightness, blur_score = analyze_image_quality(image)
     decision, dynamic_threshold = adaptive_liveness_decision(label, score, brightness, blur_score)
     return decision, score
@@ -106,24 +106,31 @@ def check_liveness_official(image):
 def poll_cloud_for_result(evidence_key):
     print(f"⏳ Polling Cloud for: {evidence_key}")
     
-    # Total patience = 50 seconds, with HYPER-FAST reaction time (0.25s)
-    for i in range(200): 
+    # Total patience = 50 seconds, with faster reaction time
+    for i in range(100): 
         try:
-            # Bypass Azure/Browser caching
-            url = f"{AZURE_BASE}/api/hardware/poll?evidence_key={evidence_key}&_t={int(time.time())}"
+            # Add a timestamp to bypass Azure/Browser caching
+            url = f"{AZURE_BASE}/api/attendance?limit=5&_t={int(time.time())}"
             r = requests.get(url, timeout=2) # Short timeout for the GET itself
             
             if r.status_code == 200:
-                data = r.json()
-                if data.get("status") == "found":
-                    authorized = data.get("authorized", 0)
-                    print(f"✅ Cloud Match Found! Authorized: {authorized}")
-                    return authorized == 1
+                logs = r.json()
+                for log in logs:
+                    meta = log.get("metadata")
+                    if isinstance(meta, str):
+                        try: meta = json.loads(meta)
+                        except: meta = {}
+                    
+                    # Exact match on the unique S3 filename
+                    if meta and meta.get("evidence_key") == evidence_key:
+                        authorized = int(log.get('authorized', 0))
+                        print(f"✅ Cloud Match Found! Authorized: {authorized}")
+                        return authorized == 1
         except Exception:
             pass
         
-        # ✅ Faster polling (0.25s) reduces lag significantly
-        time.sleep(0.25) 
+        # ✅ Faster polling (0.5s instead of 1.0s) reduces lag significantly
+        time.sleep(0.5) 
     
     print("⚠️ Cloud verification timeout")
     return False
